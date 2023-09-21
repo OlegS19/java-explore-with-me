@@ -16,6 +16,7 @@ import ru.practicum.requests.model.ParticipationRequest;
 import ru.practicum.requests.repository.RequestRepository;
 import ru.practicum.users.model.User;
 import ru.practicum.users.repository.UserRepository;
+import ru.practicum.util.enam.EventRequestStatus;
 
 import java.util.Collections;
 import java.util.List;
@@ -41,7 +42,7 @@ public class RequestServiceImpl implements RequestService {
 
     private EventRequestStatusUpdateResult createConfirmedStatus(List<ParticipationRequest> requests, Event event) {
         validateParticipantLimit(event);
-        int potentialParticipant = event.getParticipantLimit() - event.getConfirmedRequests();
+        long potentialParticipant = event.getParticipantLimit() - event.getConfirmedRequests();
 
         List<ParticipationRequest> confirmedRequests;
         List<ParticipationRequest> rejectedRequests;
@@ -63,7 +64,6 @@ public class RequestServiceImpl implements RequestService {
         }
 
         event.setConfirmedRequests(event.getConfirmedRequests() + confirmedRequests.size());
-        eventRepository.save(event);
 
         List<ParticipationRequest> updatedRequests = Stream.concat(confirmedRequests.stream(), rejectedRequests.stream())
                 .collect(Collectors.toList());
@@ -87,7 +87,8 @@ public class RequestServiceImpl implements RequestService {
                 -> new NotFoundException("User with id=" + userId + " hasn't found."));
         Event event = eventRepository.findById(eventId).orElseThrow(()
                 -> new NotFoundException("Event with id=" + eventId + "  hasn't found found."));
-
+        event.setConfirmedRequests(requestRepository
+                .countRequestByEventIdAndStatus(event.getId(), EventRequestStatus.CONFIRMED));
         validateParticipantLimit(event);
 
         if (requestRepository.existsByRequesterIdAndEventId(userId, eventId)) {
@@ -103,11 +104,6 @@ public class RequestServiceImpl implements RequestService {
         }
 
         ParticipationRequest participationRequest = requestRepository.save(mapToNewParticipationRequest(event, user));
-
-        if (participationRequest.getStatus() == CONFIRMED) {
-            event.setConfirmedRequests(event.getConfirmedRequests() + 1);
-            eventRepository.save(event);
-        }
 
         log.info("Create participation request {} ", participationRequest);
         return mapToParticipationRequestDto(participationRequest);
@@ -142,6 +138,8 @@ public class RequestServiceImpl implements RequestService {
                                                                           EventRequestStatusUpdateRequest statusUpdateRequest) {
         Event event = eventRepository.findByIdAndInitiatorId(eventId, userId)
                 .orElseThrow(() -> new NotFoundException("Event with id=" + eventId + " hasn't found."));
+        event.setConfirmedRequests(requestRepository
+                .countRequestByEventIdAndStatus(event.getId(), EventRequestStatus.CONFIRMED));
 
         if (!event.getRequestModeration() || event.getParticipantLimit() == 0) {
             throw new ValidateException("It isn't possible to update status if the application limit = 0");
@@ -183,7 +181,7 @@ public class RequestServiceImpl implements RequestService {
     }
 
     private void validateParticipantLimit(Event event) {
-        if (event.getParticipantLimit() > 0 && event.getConfirmedRequests().equals(event.getParticipantLimit())) {
+        if (event.getParticipantLimit() != 0 && event.getParticipantLimit() <= event.getConfirmedRequests()) {
             throw new ValidateException("The event participant number  was reached participation request limit.");
         }
     }
